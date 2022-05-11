@@ -18,7 +18,7 @@ import java.util.Iterator;
 import zipkin2.codec.Encoding;
 
 /** Use of this type happens off the application's main thread. This type is not thread-safe */
-abstract class BufferNextMessage<S> implements SpanWithSizeConsumer<S> {
+abstract class BufferNextMessage<S> implements SpanWithSizeConsumer<S> { // 抽象 Consumer，Span 信息的消费者，依靠 Sender 上报 Span 信息
 
   static <S> BufferNextMessage<S> create(Encoding encoding, int maxBytes, long timeoutNanos) {
     switch (encoding) {
@@ -32,9 +32,9 @@ abstract class BufferNextMessage<S> implements SpanWithSizeConsumer<S> {
     throw new UnsupportedOperationException("encoding: " + encoding);
   }
 
-  final int maxBytes;
+  final int maxBytes; // 发送给 Zipkin 的时候，每条 message 的最大字节数
   final long timeoutNanos;
-  final ArrayList<S> spans = new ArrayList<>();
+  final ArrayList<S> spans = new ArrayList<>(); // 存储接收的 messages
   final ArrayList<Integer> sizes = new ArrayList<>();
 
   long deadlineNanoTime;
@@ -45,11 +45,11 @@ abstract class BufferNextMessage<S> implements SpanWithSizeConsumer<S> {
     this.maxBytes = maxBytes;
     this.timeoutNanos = timeoutNanos;
   }
-
+  // 统计所有总字节数 messageSizeInBytes
   abstract int messageSizeInBytes(int nextSizeInBytes);
 
   abstract void resetMessageSizeInBytes();
-
+  // json 实现
   static final class BufferNextJsonMessage<S> extends BufferNextMessage<S> {
     boolean hasAtLeastOneSpan;
 
@@ -85,7 +85,7 @@ abstract class BufferNextMessage<S> implements SpanWithSizeConsumer<S> {
       hasAtLeastOneSpan = true;
     }
   }
-
+  // thrift 实现
   static final class BufferNextThriftMessage<S> extends BufferNextMessage<S> {
 
     BufferNextThriftMessage(int maxBytes, long timeoutNanos) {
@@ -106,7 +106,7 @@ abstract class BufferNextMessage<S> implements SpanWithSizeConsumer<S> {
       }
     }
   }
-
+  // proto3 实现
   static final class BufferNextProto3Message<S> extends BufferNextMessage<S> {
     BufferNextProto3Message(int maxBytes, long timeoutNanos) {
       super(maxBytes, timeoutNanos);
@@ -130,15 +130,15 @@ abstract class BufferNextMessage<S> implements SpanWithSizeConsumer<S> {
   /** This is done inside a lock that holds up writers, so has to be fast. No encoding! */
   @Override
   public boolean offer(S next, int nextSizeInBytes) {
-    int x = messageSizeInBytes(nextSizeInBytes);
+    int x = messageSizeInBytes(nextSizeInBytes); // 统计所有总字节数 messageSizeInBytes
     int y = maxBytes;
     int includingNextVsMaxBytes = (x < y) ? -1 : ((x == y) ? 0 : 1); // Integer.compare, but JRE 6
-
+    // 所有总字节数 messageSizeInBytes 大于 该 message 的最大字节数 maxBytes，则将该 buffer 标记为已满状态，说明可以 flush 了
     if (includingNextVsMaxBytes > 0) {
       bufferFull = true;
       return false; // can't fit the next message into this buffer
     }
-
+    // 添加到 buffer
     addSpanToBuffer(next, nextSizeInBytes);
     messageSizeInBytes = x;
 
@@ -152,16 +152,16 @@ abstract class BufferNextMessage<S> implements SpanWithSizeConsumer<S> {
   }
 
   long remainingNanos() {
-    if (spans.isEmpty()) {
-      deadlineNanoTime = System.nanoTime() + timeoutNanos;
+    if (spans.isEmpty()) { // 当 buffer 为空，则重置一个 deadlineNanoTime，其值为当前系统时间加上 timeoutNanos
+      deadlineNanoTime = System.nanoTime() + timeoutNanos; // 手动 flush 的时候，timeoutNanos 为 0 ，说明 buffer 立即 ready 了
     }
     return Math.max(deadlineNanoTime - System.nanoTime(), 0);
   }
-
+  // 当系统时间超过这个时间或者 buffer 满了的时候， isReady 会返回 true，即 buffer 为准备就绪状态，可以 flush
   boolean isReady() {
     return bufferFull || remainingNanos() <= 0;
   }
-
+  // 返回 buffer 里的所有数据，并将 buffer 清空
   // this occurs off the application thread
   void drain(SpanWithSizeConsumer<S> consumer) {
     Iterator<S> spanIterator = spans.iterator();

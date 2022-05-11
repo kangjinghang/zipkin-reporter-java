@@ -115,7 +115,7 @@ public abstract class AsyncReporter<S> extends Component implements Reporter<S>,
 
     /**
      * Launches the flush thread when {@link #messageTimeoutNanos} is greater than zero.
-     */
+     */ // 当 messageTimeoutNanos 大于0时，启动一个守护线程 flushThread
     public Builder threadFactory(ThreadFactory threadFactory) {
       if (threadFactory == null) throw new NullPointerException("threadFactory == null");
       this.threadFactory = threadFactory;
@@ -209,9 +209,9 @@ public abstract class AsyncReporter<S> extends Component implements Reporter<S>,
   static final class BoundedAsyncReporter<S> extends AsyncReporter<S> {
     static final Logger logger = Logger.getLogger(BoundedAsyncReporter.class.getName());
     final AtomicBoolean started, closed;
-    final BytesEncoder<S> encoder;
-    final ByteBoundedQueue<S> pending;
-    final Sender sender;
+    final BytesEncoder<S> encoder; // Span 的编码器，将 Span 编码成二进制，便于 sender 发送给 Zipkin
+    final ByteBoundedQueue<S> pending; // 类似于 BlockingQueue，是一个既有数量限制，又有字节数限制的阻塞队列
+    final Sender sender; // 将编码后的二进制数据，发送给 Zipkin
     final int messageMaxBytes;
     final long messageTimeoutNanos, closeTimeoutNanos;
     final CountDownLatch close;
@@ -230,12 +230,12 @@ public abstract class AsyncReporter<S> extends Component implements Reporter<S>,
       this.closed = new AtomicBoolean(false);
       // pretend we already started when config implies no thread that flushes the queue in a loop.
       this.started = new AtomicBoolean(builder.messageTimeoutNanos == 0);
-      this.close = new CountDownLatch(builder.messageTimeoutNanos > 0 ? 1 : 0);
+      this.close = new CountDownLatch(builder.messageTimeoutNanos > 0 ? 1 : 0); // messageTimeoutNanos > 0 时，赋值为 1
       this.metrics = builder.metrics;
       this.threadFactory = builder.threadFactory;
       this.encoder = encoder;
     }
-
+    // 当 messageTimeoutNanos 大于0时，启动一个守护线程 flushThread，一直循环调用 BoundedAsyncReporter 的 flush 方法，将内存中的 Span 信息上报给 Zipkin
     void startFlusherThread() {
       BufferNextMessage<S> consumer =
           BufferNextMessage.create(encoder.encoding(), messageMaxBytes, messageTimeoutNanos);
@@ -250,24 +250,24 @@ public abstract class AsyncReporter<S> extends Component implements Reporter<S>,
       // Lazy start so that reporters never used don't spawn threads
       if (started.compareAndSet(false, true)) startFlusherThread();
       metrics.incrementSpans(1);
-      int nextSizeInBytes = encoder.sizeInBytes(next);
+      int nextSizeInBytes = encoder.sizeInBytes(next); // 然后计算出 messageSize
       int messageSizeOfNextSpan = sender.messageSizeInBytes(nextSizeInBytes);
-      metrics.incrementSpanBytes(nextSizeInBytes);
+      metrics.incrementSpanBytes(nextSizeInBytes);  // 记录相应的统计信息
       if (closed.get() ||
           // don't enqueue something larger than we can drain
           messageSizeOfNextSpan > messageMaxBytes ||
-          !pending.offer(next, nextSizeInBytes)) {
+          !pending.offer(next, nextSizeInBytes)) { // 添加到 queue(pending)
         metrics.incrementSpansDropped(1);
       }
     }
-
+    // 手动调用
     @Override public final void flush() {
       if (closed.get()) throw new ClosedSenderException();
       flush(BufferNextMessage.create(encoder.encoding(), messageMaxBytes, 0));
     }
 
     void flush(BufferNextMessage<S> bundler) {
-      pending.drainTo(bundler, bundler.remainingNanos());
+      pending.drainTo(bundler, bundler.remainingNanos()); // 将队列中的数据，全部提取到 BufferNextMessage 中，直到 buffer(bundler) 满为止
 
       // record after flushing reduces the amount of gauge events vs on doing this on report
       metrics.updateQueuedSpans(pending.count);
@@ -276,7 +276,7 @@ public abstract class AsyncReporter<S> extends Component implements Reporter<S>,
       // loop around if we are running, and the bundle isn't full
       // if we are closed, try to send what's pending
       if (!bundler.isReady() && !closed.get()) return;
-
+      // 当 bundler 准备好，即 isReady() 返回true，将 bundler 中的 message 全部取出来。
       // Signal that we are about to send a message of a known size in bytes
       metrics.incrementMessages();
       metrics.incrementMessageBytes(bundler.sizeInBytes());
@@ -296,7 +296,7 @@ public abstract class AsyncReporter<S> extends Component implements Reporter<S>,
       });
 
       try {
-        sender.sendSpans(nextMessage).execute();
+        sender.sendSpans(nextMessage).execute(); // 调用 Sender 的 sendSpans 方法，发送到 Zipkin。
       } catch (Throwable t) {
         // In failure case, we increment messages and spans dropped.
         int count = nextMessage.size();
@@ -334,20 +334,20 @@ public abstract class AsyncReporter<S> extends Component implements Reporter<S>,
     }
 
     @Override public void close() {
-      if (!closed.compareAndSet(false, true)) return; // already closed
+      if (!closed.compareAndSet(false, true)) return; // already closed。首先将 closed 变量置为 true
       started.set(true); // prevent anything from starting the thread after close!
       try {
         // wait for in-flight spans to send
-        if (!close.await(closeTimeoutNanos, TimeUnit.NANOSECONDS)) {
+        if (!close.await(closeTimeoutNanos, TimeUnit.NANOSECONDS)) { // 等待close 信号量(CountDownLatch)的释放，此处代码会阻塞，一直到 Flusher 中 finally 中调用 result.close.countDown();
           logger.warning("Timed out waiting for in-flight spans to send");
         }
       } catch (InterruptedException e) {
         logger.warning("Interrupted waiting for in-flight spans to send");
         Thread.currentThread().interrupt();
       }
-      int count = pending.clear();
+      int count = pending.clear(); // 清理 pending queue
       if (count > 0) {
-        metrics.incrementSpansDropped(count);
+        metrics.incrementSpansDropped(count); // 将这些 Span 的数量添加到 metrics 统计信息中
         logger.warning("Dropped " + count + " spans due to AsyncReporter.close()");
       }
     }
@@ -374,7 +374,7 @@ public abstract class AsyncReporter<S> extends Component implements Reporter<S>,
 
     @Override public void run() {
       try {
-        while (!result.closed.get()) {
+        while (!result.closed.get()) { // 没有 closed，就一直死循环
           result.flush(consumer);
         }
       } catch (RuntimeException | Error e) {
@@ -383,10 +383,10 @@ public abstract class AsyncReporter<S> extends Component implements Reporter<S>,
       } finally {
         int count = consumer.count();
         if (count > 0) {
-          result.metrics.incrementSpansDropped(count);
+          result.metrics.incrementSpansDropped(count); // 将这些 Span 的数量添加到 metrics 统计信息中
           logger.warning("Dropped " + count + " spans due to AsyncReporter.close()");
         }
-        result.close.countDown();
+        result.close.countDown(); // while 循环将结束执行，countDown
       }
     }
 

@@ -44,7 +44,7 @@ import zipkin2.reporter.internal.InternalReporter;
  * also allows them to use their most natural message type. For example, kafka would more naturally
  * send messages as byte arrays.
  */
-public abstract class Sender extends Component {
+public abstract class Sender extends Component { // 将编码后的二进制数据，发送给 Zipkin
 
   /** Returns the encoding this sender requires spans to have. */
   public abstract Encoding encoding();

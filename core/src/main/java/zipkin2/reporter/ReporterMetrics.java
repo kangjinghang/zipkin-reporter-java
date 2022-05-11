@@ -41,7 +41,7 @@ package zipkin2.reporter;
  * </ul>
  * </pre>
  */
-public interface ReporterMetrics {
+public interface ReporterMetrics { // Span 的 report 相关的统计信息
 
   /**
    * Increments count of message attempts, which contain 1 or more spans. Ex POST requests or Kafka

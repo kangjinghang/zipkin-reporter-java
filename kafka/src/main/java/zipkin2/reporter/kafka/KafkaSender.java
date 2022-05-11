@@ -93,9 +93,9 @@ public final class KafkaSender extends Sender {
   /** Configuration including defaults needed to send spans to a Kafka topic. */
   public static final class Builder {
     final Properties properties;
-    Encoding encoding = Encoding.JSON;
-    String topic = "zipkin";
-    int messageMaxBytes = 500_000;
+    Encoding encoding = Encoding.JSON; // 编码默认用 JSON
+    String topic = "zipkin"; // topic 默认为zipkin
+    int messageMaxBytes = 500_000; // 消息最大字节数1000000
 
     Builder(Properties properties) {
       this.properties = properties;
@@ -323,9 +323,9 @@ public final class KafkaSender extends Sender {
     KafkaCall(byte[] message) {
       this.message = message;
     }
-
+    // 父类 BaseCall 方法 execute 会调用 doExecute
     @Override protected Void doExecute() throws IOException {
-      AwaitableCallback callback = new AwaitableCallback();
+      AwaitableCallback callback = new AwaitableCallback(); // AwaitableCallback 将 KafkaProducer的异步发送消息的方法，强制转为了同步发送
       get().send(new ProducerRecord<>(topic, message), new CallbackAdapter(callback));
       callback.await();
       return null;
